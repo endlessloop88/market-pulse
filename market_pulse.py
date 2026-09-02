@@ -1,15 +1,34 @@
-# ==========================================
-# Proje: MarketPulse - Fiyat Takip Motoru
-# Geliştirici: Yunus
-# ==========================================
+from selenium.webdriver.common.by import By
 
-urun_adi = input("Takip etmek istediğiniz ürünün adını girin: ")
-anlik_fiyat = float(input(f"'{urun_adi}' için güncel fiyatı girin (TL): "))
-hedef_fiyat = float(input("Hedeflediğiniz (alarm kurmak istediğiniz) maksimum fiyatı girin (TL): "))
 
-print("\n--- MARKETPULSE FİYAT ANALİZ RAPORU ---")
-if anlik_fiyat <= hedef_fiyat:
-    print(f"Harika haber! {urun_adi} şu an {anlik_fiyat} TL. Hedef fiyatın altında, hemen alınabilir!")
-else:
-    fark = anlik_fiyat - hedef_fiyat
-    print(f"Uyarı: {urun_adi} şu an {anlik_fiyat} TL. Hedef fiyattan {fark:.2f} TL daha pahalı, takipte kal.")
+def fiyat_cek_alternatifli(driver, url):
+    driver.get(url)
+
+    # Denenecek olası fiyat seçicileri (Farklı HTML etiketleri / sınıfları)
+    aday_seciciler = [
+        "span.a-price-whole",  # Amazon genel fiyat sınıfı
+        "span#priceblock_ourprice",  # Alternatif Amazon ID
+        ".price-val",  # Örnek e-ticaret sınıfı
+        "[data-price]"  # Data niteliği taşıyan etiketler
+    ]
+
+    bulunan_fiyat = None
+
+    for secici in aday_seciciler:
+        try:
+            # Alternatifleri sırayla deniyoruz (if-else mantığıyla akıllı arama)
+            element = driver.find_element(By.CSS_SELECTOR, secici)
+            if element and element.text.strip():
+                bulunan_fiyat = element.text.strip()
+                break  # Fiyatı bulduysa döngüden çık
+        except:
+            continue  # Bulamazsa sıradakine geç
+
+    if bulunan_fiyat:
+        print(f"Başarılı! Yakalanan Fiyat: {bulunan_fiyat}")
+        return bulunan_fiyat
+    else:
+        print("Bu turda fiyat okunamadı, alternatifler tükendi.")
+        return None
+
+

@@ -18,7 +18,7 @@ from selenium.webdriver.support import expected_conditions as EC
 app = Flask(__name__)
 
 
-# Veritabanını başlatan fonksiyon
+# Veritabanını başlatan fonksiyon (guncel_fiyat sütunu eklendi)
 def init_db():
     conn = sqlite3.connect('market_pulse.db', check_same_thread=False)
     cursor = conn.cursor()
@@ -34,11 +34,12 @@ def init_db():
                        TEXT,
                        hedef_fiyat
                        REAL,
+                       guncel_fiyat
+                       REAL,
                        tarih
                        TEXT
                    )
                    ''')
-
     conn.commit()
     conn.close()
 
@@ -86,7 +87,6 @@ def fiyat_getir_selenium(url):
     try:
         driver.get(url)
 
-        # Farklı sitelerin yaygın fiyat etiketleri (Sırayla taranır)
         seciciler = [
             "[data-test-id='price-current-price']",  # Hepsiburada
             ".prc-dsc",  # Trendyol
@@ -104,15 +104,12 @@ def fiyat_getir_selenium(url):
                 )
                 if element and element.text.strip():
                     fiyat_str = element.text.strip()
-                    break  # Fiyat bulunduysa döngüden çık
+                    break
             except:
-                continue  # Bulamazsa bir sonraki seçiciyi dene
+                continue
 
         if fiyat_str:
-            # Metin temizliği (Örn: "2.499,99 TL" formatını düzenleme)
             fiyat_temiz = fiyat_str.replace(" TL", "").replace("TL", "").replace(".", "").replace(",", ".").strip()
-
-            # Regex ile güvenli bir şekilde sayısal değeri çekelim
             sayi_eslesmesi = re.findall(r'\d+\.\d+|\d+', fiyat_temiz)
             if sayi_eslesmesi:
                 return float("".join(sayi_eslesmesi))
@@ -132,7 +129,6 @@ def arka_plan_fiyat_kontrol():
     cursor = conn.cursor()
     cursor.execute("SELECT id, url, hedef_fiyat FROM urunler")
     kayitlar = cursor.fetchall()
-    conn.close()
 
     for kayit in kayitlar:
         urun_id, url, hedef_fiyat = kayit
@@ -142,20 +138,25 @@ def arka_plan_fiyat_kontrol():
 
         if anlik_fiyat:
             print(f"-> Güncel Fiyat: {anlik_fiyat} TL | Hedef Fiyat: {hedef_fiyat} TL")
+
+            # Fiyatı veritabanında güncelliyoruz
+            cursor.execute("UPDATE urunler SET guncel_fiyat = ? WHERE id = ?", (anlik_fiyat, urun_id))
+            conn.commit()
+
             if anlik_fiyat <= hedef_fiyat:
                 print("Hedef fiyata ulaşıldı! E-posta tetikleniyor...")
                 eposta_gonder(url, hedef_fiyat, anlik_fiyat)
         else:
             print(f"-> Bu turda fiyat okunamadı, sonraki turda tekrar denenecek.")
 
+    conn.close()
     print("--- Tarama Tamamlandı ---")
 
 
-# APScheduler'ı Başlatıyoruz (Her 60 saniyede bir otomatik kontrol)
+# APScheduler Başlatılıyor
 scheduler = BackgroundScheduler()
 scheduler.add_job(func=arka_plan_fiyat_kontrol, trigger="interval", seconds=60)
 scheduler.start()
-
 atexit.register(lambda: scheduler.shutdown())
 
 HTML_TEMPLATE = """
@@ -188,15 +189,16 @@ HTML_TEMPLATE = """
     </div>
 
     <!-- Geçmiş Takip Edilen Ürünler Tablosu -->
-    <div style="background: #1e1e1e; padding: 20px; border-radius: 10px; width: 720px; box-shadow: 0 4px 15px rgba(0,0,0,0.5);">
+    <div style="background: #1e1e1e; padding: 20px; border-radius: 10px; width: 780px; box-shadow: 0 4px 15px rgba(0,0,0,0.5);">
         <h3 style="color: #00ffcc; margin-top: 0; text-align: center;">Aktif Akıllı Takipler</h3>
         <table style="width: 100%; border-collapse: collapse; font-size: 13px; table-layout: fixed;">
             <thead>
                 <tr style="border-bottom: 1px solid #444; text-align: left; color: #888;">
-                    <th style="padding: 8px; width: 8%;">ID</th>
-                    <th style="padding: 8px; width: 37%;">Ürün Linki</th>
-                    <th style="padding: 8px; width: 18%;">Hedef Fiyat</th>
-                    <th style="padding: 8px; width: 25%;">Tarih</th>
+                    <th style="padding: 8px; width: 6%;">ID</th>
+                    <th style="padding: 8px; width: 32%;">Ürün Linki</th>
+                    <th style="padding: 8px; width: 15%;">Hedef Fiyat</th>
+                    <th style="padding: 8px; width: 15%;">Güncel Fiyat</th>
+                    <th style="padding: 8px; width: 20%;">Tarih</th>
                     <th style="padding: 8px; width: 12%; text-align: center;">İşlem</th>
                 </tr>
             </thead>
@@ -208,14 +210,15 @@ HTML_TEMPLATE = """
                         <a href="{{ urun[1] }}" target="_blank" style="color: #ff6600; text-decoration: none;" title="{{ urun[1] }}">{{ urun[1] }}</a>
                     </td>
                     <td style="padding: 8px; color: #00ffcc;">{{ urun[2] }} TL</td>
-                    <td style="padding: 8px; color: #aaa; font-size: 11px;">{{ urun[3] }}</td>
+                    <td style="padding: 8px; color: #ffff66;">{{ urun[3] if urun[3] else 'Bekliyor...' }}</td>
+                    <td style="padding: 8px; color: #aaa; font-size: 11px;">{{ urun[4] }}</td>
                     <td style="padding: 8px; text-align: center;">
                         <a href="{{ url_for('sil', id=urun[0]) }}" style="background: #ff4444; color: white; padding: 4px 8px; border-radius: 3px; text-decoration: none; font-size: 11px; font-weight: bold;">Sil</a>
                     </td>
                 </tr>
                 {% else %}
                 <tr>
-                    <td colspan="5" style="padding: 10px; text-align: center; color: #666;">Henüz takip edilen ürün yok.</td>
+                    <td colspan="6" style="padding: 10px; text-align: center; color: #666;">Henüz takip edilen ürün yok.</td>
                 </tr>
                 {% endfor %}
             </tbody>
@@ -244,7 +247,7 @@ def index():
 
     conn = sqlite3.connect('market_pulse.db')
     cursor = conn.cursor()
-    cursor.execute("SELECT id, url, hedef_fiyat, tarih FROM urunler ORDER BY id DESC")
+    cursor.execute("SELECT id, url, hedef_fiyat, guncel_fiyat, tarih FROM urunler ORDER BY id DESC")
     kayitlar = cursor.fetchall()
     conn.close()
 
@@ -261,5 +264,8 @@ def sil(id):
     return redirect(url_for('index'))
 
 
+import os
+
 if __name__ == '__main__':
-    app.run(debug=True)
+    port = int(os.environ.get('PORT', 5000))
+    app.run(host='0.0.0.0', port=port)
